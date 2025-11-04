@@ -361,6 +361,10 @@
         
         const populateSalesDropdown = () => {
             const dropdown = document.getElementById('sale-item-id');
+
+            // 1. **Capture the current selection ID before clearing**
+            const currentSelectionId = dropdown.value; 
+
             dropdown.innerHTML = '<option value="">-- Select Carpet --</option>';
             inventoryData.forEach(item => {
                 const stockQty = parseInt(item.Stock || 0);
@@ -369,6 +373,11 @@
                 option.textContent = `${item.Name} (Stock: ${stockQty})`;
                 dropdown.appendChild(option);
             });
+
+            // 2. **Re-apply the selection after the list is rebuilt**
+            if (currentSelectionId && dropdown.querySelector(`option[value="${currentSelectionId}"]`)) {
+                dropdown.value = currentSelectionId;
+            }
         };
 
         const renderSalesHistory = () => {
