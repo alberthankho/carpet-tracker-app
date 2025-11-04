@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Carpet Sales Tracker (Simple) - Google Sheets Backend</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Inter font family -->
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f7f9fb; }
+        .card { transition: all 0.3s ease; }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
+        .tab-btn.active { border-bottom: 3px solid #06B6D4; color: #06B6D4; font-weight: 600; }
+        .scroll-area { max-height: 400px; overflow-y: auto; }
+        /* Custom scrollbar for better aesthetics */
+        .scroll-area::-webkit-scrollbar { width: 8px; }
+        .scroll-area::-webkit-scrollbar-thumb { background-color: #CBD5E1; border-radius: 4px; }
+    </style>
+</head>
+<body class="p-4 md:p-8 min-h-screen">
+
+    <div id="app" class="max-w-4xl mx-auto bg-white rounded-xl shadow-2xl p-6 md:p-10">
+        <h1 class="text-3xl font-extrabold text-cyan-700 mb-2 border-b pb-4">
+            Carpet Business Tracker
+        </h1>
+        <p id="user-info" class="text-sm text-gray-500 mb-4">
+            User ID: <span id="user-id">GSHEET MODE (100% Free)</span>
+        </p>
+
+        <!-- Loading & Error Messages -->
+        <div id="loading-indicator" class="hidden text-center p-4 text-cyan-600">
+            <svg class="animate-spin h-5 w-5 mr-3 inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span id="loading-text">Connecting to Google Sheet...</span>
+        </div>
+        <div id="error-message" class="hidden bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4 rounded-md" role="alert">
+            <p class="font-bold">Error</p>
+            <p id="error-details"></p>
+        </div>
+        
+        <!-- Tab Navigation -->
+        <div class="flex border-b border-gray-200 mb-6">
+            <button class="tab-btn p-3 mr-4 focus:outline-none active" onclick="showTab('inventory')">1. Stock (Inventory)</button>
+            <button class="tab-btn p-3 mr-4 focus:outline-none" onclick="showTab('sales')">2. Record Sale</button>
+            <button class="tab-btn p-3 focus:outline-none" onclick="showTab('receivables')">3. Debt Tracking</button>
+        </div>
+        
+        <p class="text-sm text-center text-red-600 bg-red-50 p-2 rounded-md mb-4">
+            (API URL is set. If loading fails, check your Google Sheet tabs/headers.)
+        </p>
+
+        <!-- TAB 1: INVENTORY -->
+        <div id="inventory" class="tab-content">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-4">
+                Carpet Stock Overview
+                <span class="ml-4 text-sm text-gray-500">(Auto-refresh enabled)</span>
+            </h2>
+            
+            <div id="add-item-card" class="card bg-cyan-50 p-4 rounded-lg shadow-md mb-6">
+                <h3 class="text-lg font-medium text-cyan-800 mb-3">Add New Carpet Type</h3>
+                <form id="add-item-form" class="space-y-3">
+                    <input type="text" id="item-name" placeholder="Carpet Name (e.g., Persian Red, Modern Blue 2x3m)" class="w-full p-2 border border-cyan-300 rounded-md focus:ring-cyan-500 focus:border-cyan-500" required>
+                    <input type="number" id="initial-stock" placeholder="Initial Stock Quantity (Rolls/Units)" class="w-full p-2 border border-cyan-300 rounded-md focus:ring-cyan-500 focus:border-cyan-500" min="0" required>
+                    <button type="submit" class="w-full bg-cyan-600 text-white p-2 rounded-lg font-semibold hover:bg-cyan-700 transition">Add Stock Item</button>
+                </form>
+            </div>
+
+            <div class="scroll-area bg-gray-50 p-4 rounded-lg shadow-inner">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-100 sticky top-0">
+                        <tr>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Carpet Type</th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Current Stock</th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="inventory-list" class="bg-white divide-y divide-gray-200">
+                        <!-- Inventory items will be rendered here -->
+                        <tr><td colspan="3" class="text-center p-4 text-gray-500">Loading inventory...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- TAB 2: SALES -->
+        <div id="sales" class="tab-content hidden">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-4">Record a Sale (Outflow)</h2>
+            <div class="card bg-emerald-50 p-6 rounded-xl shadow-lg">
+                <form id="record-sale-form" class="space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="sale-item-id" class="block text-sm font-medium text-gray-700">Carpet Type Sold</label>
+                            <select id="sale-item-id" class="w-full p-2 border border-emerald-300 rounded-md focus:ring-emerald-500 focus:border-emerald-500" required>
+                                <option value="">-- Select Carpet --</option>
+                                <!-- Options populated by JavaScript -->
+                            </select>
+                        </div>
+                        <div>
+                            <label for="sale-customer" class="block text-sm font-medium text-gray-700">Customer Name</label>
+                            <input type="text" id="sale-customer" placeholder="Customer Name" class="w-full p-2 border border-emerald-300 rounded-md focus:ring-emerald-500 focus:border-emerald-500" required>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label for="sale-quantity" class="block text-sm font-medium text-gray-700">Quantity Sold</label>
+                            <input type="number" id="sale-quantity" placeholder="Qty" min="1" class="w-full p-2 border border-emerald-300 rounded-md focus:ring-emerald-500 focus:border-emerald-500" required>
+                        </div>
+                        <div>
+                            <label for="sale-total-amount" class="block text-sm font-medium text-gray-700">Total Amount (Rp)</label>
+                            <input type="number" id="sale-total-amount" placeholder="Total Price" min="0" class="w-full p-2 border border-emerald-300 rounded-md focus:ring-emerald-500 focus:border-emerald-500" required>
+                        </div>
+                        <div>
+                            <label for="sale-payment-type" class="block text-sm font-medium text-gray-700">Payment Status</label>
+                            <select id="sale-payment-type" class="w-full p-2 border border-emerald-300 rounded-md focus:ring-emerald-500 focus:border-emerald-500" required>
+                                <option value="Paid">Fully Paid (Cash/Transfer)</option>
+                                <option value="Credit">Credit (Owed)</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="w-full bg-emerald-600 text-white p-3 rounded-lg font-semibold hover:bg-emerald-700 transition">
+                        Record Sale & Update Stock
+                    </button>
+                    
+                    <p id="stock-warning" class="hidden text-red-500 text-sm text-center font-medium"></p>
+                </form>
+
+                <h3 class="text-xl font-semibold text-gray-800 mt-8 mb-4">Recent Sales</h3>
+                <div class="scroll-area bg-white p-4 rounded-lg shadow-inner">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-100 sticky top-0">
+                            <tr>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Carpet</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sales-history" class="bg-white divide-y divide-gray-200 text-sm">
+                            <tr><td colspan="5" class="text-center p-4 text-gray-500">No sales recorded yet.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 3: RECEIVABLES / DEBT TRACKING -->
+        <div id="receivables" class="tab-content hidden">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-4">
+                Customer Debt Tracking (Piutang)
+                <span class="ml-4 text-sm text-gray-500">(Auto-refresh enabled)</span>
+            </h2>
+            <div class="card bg-amber-50 p-6 rounded-xl shadow-lg">
+                <p class="text-lg font-medium text-amber-800 mb-4">
+                    Total Outstanding Debt: <span id="total-receivables" class="font-bold text-2xl">Rp 0</span>
+                </p>
+                
+                <div class="scroll-area bg-white p-4 rounded-lg shadow-inner">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-100 sticky top-0">
+                            <tr>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Carpet/Date</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Amount Due</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="receivables-list" class="bg-white divide-y divide-gray-200 text-sm">
+                            <tr><td colspan="4" class="text-center p-4 text-gray-500">No outstanding debts to track.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+    
+    <!-- Confirmation/Modal Area -->
+    <div id="modal-backdrop" class="hidden fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50">
+        <div id="modal-content" class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm transform transition-all duration-300 scale-100">
+            <h3 id="modal-title" class="text-xl font-bold mb-4 text-gray-800"></h3>
+            <p id="modal-body" class="mb-6 text-gray-700"></p>
+            <div id="modal-footer" class="flex justify-end space-x-3">
+                <!-- Buttons will be inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- GOOGLE SHEETS API SCRIPT -->
+    <script>
+        // CRITICAL: USING THE URL PROVIDED BY THE USER.
+        const API_URL = 'https://script.google.com/macros/s/AKfycbwYiApCKbtAqFgh1g13EMHMFJW1_jLhQV16GWKMZHWU1g7XPyL_sQJVLRfDvmTWhv6D2A/exec'; 
+        
+        let inventoryData = []; 
+        let salesData = []; 
+        let intervalId = null;
+
+        // DOM Elements
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const loadingText = document.getElementById('loading-text');
+        const errorMessage = document.getElementById('error-message');
+        const errorDetails = document.getElementById('error-details');
+        const inventoryList = document.getElementById('inventory-list');
+        const salesHistory = document.getElementById('sales-history');
+        const receivablesList = document.getElementById('receivables-list');
+        const totalReceivablesSpan = document.getElementById('total-receivables');
+        
+        // Log URL to console for confirmation
+        console.log("Attempting to connect to API URL:", API_URL); 
+
+        // Utility Functions
+        const currencyFormat = (amount) => {
+            // Ensure amount is treated as a number
+            const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+            return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(numAmount);
+        };
+        
+        const formatDate = (dateString) => {
+            if (!dateString) return 'N/A';
+            const date = new Date(dateString);
+            return date.toLocaleDateString('id-ID');
+        };
+
+        const displayError = (message) => {
+            // Error box always visible when there is an issue
+            errorMessage.classList.remove('hidden');
+            errorDetails.textContent = message;
+            console.error("APP ERROR:", message);
+        };
+
+        const displayModal = (title, body, buttonsHtml) => {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-body').textContent = body;
+            document.getElementById('modal-footer').innerHTML = buttonsHtml;
+            document.getElementById('modal-backdrop').classList.remove('hidden');
+        };
+
+        const hideModal = () => {
+            document.getElementById('modal-backdrop').classList.add('hidden');
+        };
+        
+        // --- UI UTILITY ---
+        window.showTab = (tabId) => {
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.add('hidden');
+            });
+            document.getElementById(tabId).classList.remove('hidden');
+
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.querySelector(`.tab-btn[onclick="showTab('${tabId}')"]`).classList.add('active');
+        };
+
+
+        // --- DATA FETCHING ---
+
+        const fetchData = async (payload) => {
+            try {
+                // NOTE: Loading indicator visibility is handled by the calling function (loadAllData)
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    contentType: 'application/json',
+                    body: JSON.stringify(payload) 
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status} (Server did not return 200 OK)`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.status === 'error') {
+                     throw new Error(data.message || 'Apps Script returned a processing error.');
+                }
+                
+                return data.data;
+
+            } catch (error) {
+                displayError("API Communication Error: " + error.message);
+                return null;
+            } 
+        };
+
+        // Reads Inventory and Sales data
+        // Uses showIndicator=true for the initial load and all write actions (Add/Record/Mark)
+        // Uses showIndicator=false for silent background polling
+        window.loadAllData = async (showIndicator = true) => {
+            // Only show the visual indicator if requested (i.e., not during silent background polling)
+            if (showIndicator) {
+                loadingIndicator.classList.remove('hidden');
+                loadingText.textContent = "Loading data from Google Sheet...";
+            }
+            // Hide any previous general API errors when starting a new load attempt
+            errorMessage.classList.add('hidden');
+
+
+            const result = await fetchData({ type: 'READ_ALL' });
+
+            if (result) {
+                inventoryData = result.inventory || [];
+                salesData = result.sales || [];
+                
+                // Sort sales by date descending
+                salesData.sort((a, b) => new Date(b.Date) - new Date(a.Date));
+                
+                renderInventory();
+                populateSalesDropdown();
+                renderSalesHistory();
+                renderReceivables();
+            }
+
+            // Only hide the visual indicator if we showed it
+            if (showIndicator) {
+                loadingIndicator.classList.add('hidden');
+            }
+        };
+
+        // Function to run the silent background refresh
+        const startSilentPolling = () => {
+            // 1. Initial load (SHOWS loading indicator)
+            window.loadAllData(true); 
+
+            // 2. Start silent interval refresh (HIDE loading indicator)
+            if (intervalId) clearInterval(intervalId);
+            // Polling every 3 seconds, passing 'false' to keep it silent
+            intervalId = setInterval(() => window.loadAllData(false), 3000); 
+        };
+        
+        // --- RENDER FUNCTIONS (omitted for brevity, they remain unchanged) ---
+        
+        const renderInventory = () => {
+            inventoryList.innerHTML = '';
+            if (inventoryData.length === 0) {
+                inventoryList.innerHTML = '<tr><td colspan="3" class="text-center p-4 text-gray-500">No carpets added yet.</td></tr>';
+                return;
+            }
+
+            inventoryData.forEach(item => {
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-100 transition';
+                // Stock quantity is a string from the sheet, ensure it's displayed correctly
+                const stockQty = parseInt(item.Stock || 0); 
+                
+                row.innerHTML = `
+                    <td class="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">${item.Name}</td>
+                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-700 font-bold">${stockQty}</td>
+                    <td class="px-3 py-2 whitespace-nowrap text-sm text-center">
+                        <button onclick="window.addItemStock('${item.ID}', '${item.Name}')" class="bg-cyan-100 text-cyan-700 px-3 py-1 rounded-full text-xs font-semibold hover:bg-cyan-200 transition">
+                            + Stock
+                        </button>
+                    </td>
+                `;
+                inventoryList.appendChild(row);
+            });
+        };
+        
+        const populateSalesDropdown = () => {
+            const dropdown = document.getElementById('sale-item-id');
+            dropdown.innerHTML = '<option value="">-- Select Carpet --</option>';
+            inventoryData.forEach(item => {
+                const stockQty = parseInt(item.Stock || 0);
+                const option = document.createElement('option');
+                option.value = item.ID; // Use ID as the value
+                option.textContent = `${item.Name} (Stock: ${stockQty})`;
+                dropdown.appendChild(option);
+            });
+        };
+
+        const renderSalesHistory = () => {
+            salesHistory.innerHTML = '';
+            if (salesData.length === 0) {
+                salesHistory.innerHTML = '<tr><td colspan="5" class="text-center p-4 text-gray-500">No sales recorded yet.</td></tr>';
+                return;
+            }
+            
+            salesData.forEach(sale => {
+                const item = inventoryData.find(i => i.ID === sale.ItemID) || { Name: 'Unknown Carpet' };
+                // Status is 'Paid' or 'Credit'
+                const statusColor = sale.Status === 'Paid' ? 'text-green-600' : 'text-red-500';
+
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-100 transition';
+                row.innerHTML = `
+                    <td class="px-3 py-2 whitespace-nowrap">${formatDate(sale.Date)}</td>
+                    <td class="px-3 py-2 whitespace-nowrap">${item.Name} (${sale.Quantity} units)</td>
+                    <td class="px-3 py-2 whitespace-nowrap">${sale.Customer}</td>
+                    <td class="px-3 py-2 whitespace-nowrap font-medium">${currencyFormat(sale.TotalAmount)}</td>
+                    <td class="px-3 py-2 whitespace-nowrap ${statusColor} font-semibold">${sale.Status}</td>
+                `;
+                salesHistory.appendChild(row);
+            });
+        };
+
+        const renderReceivables = () => {
+            receivablesList.innerHTML = '';
+            let totalReceivables = 0;
+            const outstandingSales = salesData.filter(s => s.Status === 'Credit');
+
+            if (outstandingSales.length === 0) {
+                receivablesList.innerHTML = '<tr><td colspan="4" class="text-center p-4 text-gray-500">No outstanding debts to track.</td></tr>';
+            } else {
+                outstandingSales.forEach(sale => {
+                    const amount = parseFloat(sale.TotalAmount || 0);
+                    totalReceivables += amount;
+                    const item = inventoryData.find(i => i.ID === sale.ItemID) || { Name: 'Unknown Carpet' };
+                    
+                    const row = document.createElement('tr');
+                    row.className = 'hover:bg-gray-100 transition';
+                    row.innerHTML = `
+                        <td class="px-3 py-2 whitespace-nowrap font-medium">${sale.Customer}</td>
+                        <td class="px-3 py-2 whitespace-nowrap text-gray-500">${item.Name} (${formatDate(sale.Date)})</td>
+                        <td class="px-3 py-2 whitespace-nowrap font-bold text-red-600">${currencyFormat(amount)}</td>
+                        <td class="px-3 py-2 whitespace-nowrap text-center">
+                            <button onclick="window.markDebtPaid('${sale.ID}', '${sale.Customer}', ${amount})" class="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-xs font-semibold hover:bg-amber-200 transition">
+                                Mark Paid
+                            </button>
+                        </td>
+                    `;
+                    receivablesList.appendChild(row);
+                });
+            }
+
+            totalReceivablesSpan.textContent = currencyFormat(totalReceivables);
+        };
+        
+        // --- ACTION FUNCTIONS (Google Sheets Write Operations - now call loadAllData(true) on success) ---
+
+        // 1. ADD NEW INVENTORY ITEM
+        document.getElementById('add-item-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            loadingIndicator.classList.remove('hidden');
+            loadingText.textContent = "Adding new carpet type...";
+
+            const name = document.getElementById('item-name').value.trim();
+            const stock = parseInt(document.getElementById('initial-stock').value);
+
+            if (!name || isNaN(stock) || stock < 0) {
+                displayModal("Validation Error", "Please enter a valid carpet name and a non-negative initial stock quantity.", '<button onclick="hideModal()" class="bg-gray-200 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-300">Close</button>');
+                loadingIndicator.classList.add('hidden');
+                return;
+            }
+
+            const payload = {
+                type: 'ADD_INVENTORY',
+                data: { Name: name, Stock: stock }
+            };
+
+            const result = await fetchData(payload);
+            
+            if (result && result.success) {
+                document.getElementById('add-item-form').reset();
+                window.loadAllData(true); // Explicit refresh with indicator
+                displayModal("Success", `Carpet type "${name}" added with an initial stock of ${stock}.`, '<button onclick="hideModal()" class="bg-cyan-600 text-white px-4 py-2 rounded-lg hover:bg-cyan-700">OK</button>');
+            }
+            loadingIndicator.classList.add('hidden');
+        });
+
+        // 2. INCREASE EXISTING STOCK (Called from renderInventory)
+        window.addItemStock = (itemId, itemName) => {
+            displayModal(
+                `Add Stock to: ${itemName}`, 
+                "Enter the quantity of new stock received:",
+                `
+                <input type="number" id="stock-input" placeholder="Quantity to add" min="1" class="w-full p-2 border border-gray-300 rounded-md focus:ring-cyan-500 focus:border-cyan-500 mb-4" />
+                <button onclick="hideModal()" class="bg-gray-300 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-400">Cancel</button>
+                <button onclick="confirmAddStock('${itemId}', '${itemName}')" class="bg-cyan-600 text-white px-4 py-2 rounded-lg hover:bg-cyan-700">Confirm Add</button>
+                `
+            );
+            document.getElementById('stock-input').focus();
+        };
+
+        window.confirmAddStock = async (itemId, itemName) => {
+            hideModal();
+            const quantity = parseInt(document.getElementById('stock-input').value);
+            if (isNaN(quantity) || quantity <= 0) {
+                displayModal("Error", "Please enter a valid quantity greater than zero.", '<button onclick="hideModal()" class="bg-red-600 text-white px-4 py-2 rounded-lg">Close</button>');
+                return;
+            }
+
+            loadingIndicator.classList.remove('hidden');
+            loadingText.textContent = `Adding ${quantity} units to ${itemName}...`;
+
+            const payload = {
+                type: 'UPDATE_STOCK',
+                data: { ID: itemId, Quantity: quantity }
+            };
+
+            const result = await fetchData(payload);
+            
+            if (result && result.success) {
+                window.loadAllData(true); // Explicit refresh with indicator
+                displayModal("Success", `Successfully added ${quantity} units to ${itemName}.`, '<button onclick="hideModal()" class="bg-cyan-600 text-white px-4 py-2 rounded-lg">OK</button>');
+            }
+            loadingIndicator.classList.add('hidden');
+        };
+
+        // 3. RECORD A SALE TRANSACTION
+        document.getElementById('record-sale-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            loadingIndicator.classList.remove('hidden');
+            loadingText.textContent = "Processing sale...";
+
+            const itemId = document.getElementById('sale-item-id').value;
+            const customerName = document.getElementById('sale-customer').value.trim();
+            const quantity = parseInt(document.getElementById('sale-quantity').value);
+            const totalAmount = parseFloat(document.getElementById('sale-total-amount').value);
+            const paymentStatus = document.getElementById('sale-payment-type').value;
+            const stockWarning = document.getElementById('stock-warning');
+
+            stockWarning.classList.add('hidden');
+
+            if (!itemId || !customerName || isNaN(quantity) || quantity <= 0 || isNaN(totalAmount) || totalAmount < 0) {
+                displayModal("Validation Error", "Please ensure all fields are filled correctly (Carpet, Customer, Quantity > 0, Amount >= 0).", '<button onclick="hideModal()" class="bg-red-600 text-white px-4 py-2 rounded-lg">Close</button>');
+                loadingIndicator.classList.add('hidden');
+                return;
+            }
+
+            // Check if enough stock is available (Read from cache)
+            const item = inventoryData.find(i => i.ID === itemId);
+            if (!item || parseInt(item.Stock || 0) < quantity) {
+                stockWarning.textContent = `Insufficient stock! Only ${item ? item.Stock : 0} units of ${item ? item.Name : 'this item'} remaining.`;
+                stockWarning.classList.remove('hidden');
+                loadingIndicator.classList.add('hidden');
+                return;
+            }
+
+            const payload = {
+                type: 'RECORD_SALE',
+                data: {
+                    ItemID: itemId,
+                    Customer: customerName,
+                    Quantity: quantity,
+                    TotalAmount: totalAmount,
+                    Status: paymentStatus,
+                }
+            };
+            
+            const result = await fetchData(payload);
+
+            if (result && result.success) {
+                document.getElementById('record-sale-form').reset();
+                window.loadAllData(true); // Explicit refresh with indicator
+                showTab('sales'); 
+                displayModal("Sale Recorded!", `Sold ${quantity} units of ${item.Name} to ${customerName}. Stock updated!`, '<button onclick="hideModal()" class="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700">Great!</button>');
+            }
+
+            loadingIndicator.classList.add('hidden');
+        });
+
+        // 4. MARK DEBT AS PAID
+        window.markDebtPaid = (saleId, customerName, amount) => {
+            displayModal(
+                `Confirm Payment`, 
+                `Has ${customerName} fully paid the debt of ${currencyFormat(amount)}? This action cannot be undone.`,
+                `
+                <button onclick="hideModal()" class="bg-gray-300 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-400">Cancel</button>
+                <button onclick="confirmMarkPaid('${saleId}')" class="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700">Yes, Mark Paid</button>
+                `
+            );
+        };
+
+        window.confirmMarkPaid = async (saleId) => {
+            hideModal();
+            
+            loadingIndicator.classList.remove('hidden');
+            loadingText.textContent = "Recording payment...";
+
+            const payload = {
+                type: 'MARK_PAID',
+                data: { ID: saleId }
+            };
+
+            const result = await fetchData(payload);
+
+            if (result && result.success) {
+                window.loadAllData(true); // Explicit refresh with indicator
+                displayModal("Payment Cleared", "The customer debt has been successfully marked as PAID.", '<button onclick="hideModal(); showTab(\'receivables\')" class="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700">OK</button>');
+            }
+            loadingIndicator.classList.add('hidden');
+        };
+
+        // Initialize on window load: Start the silent polling mechanism
+        window.onload = startSilentPolling;
+    </script>
+</body>
+</html>
